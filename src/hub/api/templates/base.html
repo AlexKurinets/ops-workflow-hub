@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Workflow hub{% endblock %}</title>
+  <style>
+    :root { --ink: #1b2a41; --accent: #2a9d8f; --muted: #6b7280; --bg: #f7f8fa; --line: #e5e7eb; }
+    body { margin: 0; font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--ink); background: var(--bg); }
+    header { background: var(--ink); color: #fff; padding: 12px 24px; display: flex; gap: 24px; align-items: baseline; }
+    header a { color: #fff; text-decoration: none; font-weight: 600; }
+    main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .pending, .running { background: #e0f2fe; color: #075985; }
+    .waiting_retry { background: #fef3c7; color: #92400e; }
+    .succeeded, .reused { background: #d1fae5; color: #065f46; }
+    .dead_lettered, .failed { background: #fee2e2; color: #991b1b; }
+    .skipped, .cancelled { background: #e5e7eb; color: #374151; }
+    .filters a { margin-right: 12px; color: var(--accent); }
+    .filters a.on { font-weight: 700; text-decoration: underline; }
+    pre { background: #f3f4f6; padding: 8px; border-radius: 4px; overflow: auto; font-size: 12px; margin: 0; }
+    .reason { background: #fee2e2; border-left: 4px solid #991b1b; padding: 8px 12px; margin: 12px 0; }
+    code { font-size: 12px; }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header><a href="/ops">Workflow hub</a><span class="muted">operations view</span></header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Runs{% endblock %}
+{% block content %}
+<h2>Recent runs</h2>
+<p class="filters">
+  <a href="/ops" class="{{ 'on' if not selected }}">all</a>
+  {% for s in statuses %}
+  <a href="/ops?status={{ s }}" class="{{ 'on' if selected == s }}">{{ s }} ({{ counts[s] }})</a>
+  {% endfor %}
+</p>
+<table>
+  <thead><tr><th>Created</th><th>Workflow</th><th>Status</th><th>Step</th><th>Attempt</th><th>Reason</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td class="muted">{{ r.created_at[:19] }}</td>
+      <td><a href="/ops/runs/{{ r.id }}">{{ r.workflow }}</a><br><code class="muted">{{ r.id }}</code></td>
+      <td><span class="pill {{ r.status }}">{{ r.status }}</span>{% if r.replay_count %}<br><span class="muted">replayed {{ r.replay_count }}x</span>{% endif %}</td>
+      <td>{{ r.current_step or '' }}</td>
+      <td>{{ r.attempt }}</td>
+      <td>{{ r.dead_letter_reason or '' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">No runs yet. Send a webhook or run <code>hub simulate placement</code>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

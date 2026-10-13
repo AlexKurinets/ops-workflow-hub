@@ -1,0 +1,48 @@
+name: onboarding_signed
+version: 2
+description: >
+  The candidate signs the onboarding packet. Mark them onboarded in the ATS, make sure the
+  CRM has them as a contact with the signing logged on their timeline, and tell the
+  onboarding channel.
+
+trigger:
+  event:
+    source: esign
+    type: envelope.completed
+
+steps:
+  - id: load_envelope
+    action: esign.get_envelope
+    with:
+      envelope_id: "{{ event.data.envelopeId }}"
+
+  - id: mark_onboarded
+    action: ats.update_candidate
+    with:
+      candidate_id: "{{ steps.load_envelope.fields.candidate_id }}"
+      status: onboarding_complete
+
+  - id: crm_contact
+    action: crm.upsert_contact
+    with:
+      email: "{{ steps.load_envelope.recipient_email }}"
+      first_name: "{{ steps.mark_onboarded.first_name }}"
+      last_name: "{{ steps.mark_onboarded.last_name }}"
+
+  - id: log_activity
+    action: crm.log_activity
+    idempotency_key: "envelope:{{ event.data.envelopeId }}:signed-activity"
+    with:
+      contact_id: "{{ steps.crm_contact.id }}"
+      kind: onboarding_signed
+      note: >-
+        Signed the onboarding packet for {{ steps.load_envelope.fields.client }}
+        ({{ steps.load_envelope.fields.job_title }}).
+
+  - id: notify
+    action: slack.post
+    with:
+      channel: "#onboarding"
+      text: >-
+        {{ steps.load_envelope.recipient_name }} signed the onboarding packet for
+        {{ steps.load_envelope.fields.client }}. ATS status is now onboarding_complete.

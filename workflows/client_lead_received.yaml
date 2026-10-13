@@ -1,0 +1,68 @@
+name: client_lead_received
+version: 2
+description: >
+  A prospective client fills in the website form. Find or create the company in the CRM by
+  email domain, upsert the contact, log the enquiry on their timeline, tell the sales
+  channel and send an acknowledgement.
+
+trigger:
+  event:
+    source: forms
+    type: lead.received
+
+steps:
+  - id: normalise
+    action: hub.set
+    with:
+      email: "{{ event.data.email | lower | trim }}"
+      domain: '{{ (event.data.email | lower | trim).split("@")[1] }}'
+      full_name: "{{ event.data.first_name | trim }} {{ event.data.last_name | trim }}"
+
+  - id: find_company
+    action: crm.find_company
+    with:
+      domain: "{{ steps.normalise.domain }}"
+
+  - id: create_company
+    action: crm.upsert_company
+    when: not steps.find_company.found
+    idempotency_key: "lead:{{ event.external_id }}:company"
+    with:
+      name: "{{ event.data.company }}"
+      domain: "{{ steps.normalise.domain }}"
+      owner: sales-inbox
+
+  - id: upsert_contact
+    action: crm.upsert_contact
+    with:
+      email: "{{ steps.normalise.email }}"
+      first_name: "{{ event.data.first_name | trim }}"
+      last_name: "{{ event.data.last_name | trim }}"
+      company_id: "{{ steps.find_company.id if steps.find_company.found else steps.create_company.id }}"
+
+  - id: log_activity
+    action: crm.log_activity
+    idempotency_key: "lead:{{ event.external_id }}:activity"
+    with:
+      contact_id: "{{ steps.upsert_contact.id }}"
+      kind: web_lead
+      note: "{{ event.data.message }}"
+
+  - id: notify_sales
+    action: slack.post
+    with:
+      channel: "#new-leads"
+      text: >-
+        New lead: {{ steps.normalise.full_name }} at {{ event.data.company }}
+        ({{ steps.normalise.email }}).
+        {{ "Existing account." if steps.find_company.found else "New account." }}
+
+  - id: acknowledge
+    action: email.send
+    idempotency_key: "lead:{{ event.external_id }}:ack"
+    with:
+      to: "{{ steps.normalise.email }}"
+      subject: "Thanks for getting in touch"
+      body: >-
+        Hi {{ event.data.first_name | trim }}, thanks for contacting us about staffing for
+        {{ event.data.company }}. Someone from our team will reply within one business day.

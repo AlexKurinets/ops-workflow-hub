@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ run.workflow }} {{ run.id }}{% endblock %}
+{% block content %}
+<h2>{{ run.workflow }} <span class="pill {{ run.status }}">{{ run.status }}</span></h2>
+<p class="muted"><code>{{ run.id }}</code> · created {{ run.created_at[:19] }}
+  {% if run.finished_at %}· finished {{ run.finished_at[:19] }}{% endif %}
+  {% if run.replay_count %}· replayed {{ run.replay_count }}x{% endif %}</p>
+{% if run.dead_letter_reason %}
+<div class="reason"><strong>Needs attention:</strong> {{ run.dead_letter_reason }}<br>
+<span class="muted">Replay: <code>hub replay {{ run.id }}</code> or <code>POST /runs/{{ run.id }}/replay</code></span></div>
+{% endif %}
+{% if run.next_attempt_at %}<p>Next attempt at {{ run.next_attempt_at[:19] }} (attempt {{ run.attempt + 1 }}).</p>{% endif %}
+
+<h3>Event</h3>
+<p><strong>{{ run.event.source }}</strong> / {{ run.event.type }} · external id <code>{{ run.event.external_id }}</code></p>
+<pre>{{ run.event.data | tojson(indent=2) }}</pre>
+
+<h3>Timeline</h3>
+<table>
+  <thead><tr><th>Started</th><th>Step</th><th>Action</th><th>Attempt</th><th>Status</th><th>ms</th><th>Output / error</th></tr></thead>
+  <tbody>
+  {% for s in run.timeline %}
+    <tr>
+      <td class="muted">{{ s.started_at[11:23] }}</td>
+      <td>{{ s.step }}</td>
+      <td><code>{{ s.action }}</code></td>
+      <td>{{ s.attempt }}</td>
+      <td><span class="pill {{ s.status }}">{{ s.status }}</span></td>
+      <td>{{ s.duration_ms }}</td>
+      <td>{% if s.error %}<pre>{{ s.error }}</pre>{% else %}<pre>{{ s.output | tojson(indent=2) }}</pre>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

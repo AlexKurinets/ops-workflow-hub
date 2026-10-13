@@ -1,0 +1,123 @@
+name: timesheet_approved
+version: 4
+description: >
+  The ATS does not send a webhook when a timesheet is approved, so this one is polled.
+  Hours that disagree with the placement by more than four go to the exceptions sheet and
+  the billing channel instead of payroll. Everything else is pushed to payroll and
+  invoiced, each exactly once.
+
+trigger:
+  poll:
+    source: ats
+    collection: timesheets
+    type: timesheet.approved
+    interval_seconds: 60
+
+steps:
+  - id: load_timesheet
+    action: ats.get_timesheet
+    with:
+      timesheet_id: "{{ event.data.id }}"
+
+  - id: load_placement
+    action: ats.get_placement
+    with:
+      placement_id: "{{ steps.load_timesheet.placement_id }}"
+
+  - id: load_candidate
+    action: ats.get_candidate
+    with:
+      candidate_id: "{{ steps.load_placement.candidate_id }}"
+
+  - id: load_client
+    action: ats.get_client
+    with:
+      client_id: "{{ steps.load_placement.client_id }}"
+
+  - id: check_hours
+    action: hub.set
+    with:
+      expected: "{{ steps.load_placement.weekly_hours }}"
+      submitted: "{{ steps.load_timesheet.hours }}"
+      mismatch: "{{ (steps.load_timesheet.hours - steps.load_placement.weekly_hours) | abs > 4 }}"
+
+  - id: flag_exception
+    action: sheets.append_row
+    when: steps.check_hours.mismatch
+    idempotency_key: "timesheet:{{ event.data.id }}:exception"
+    with:
+      sheet: timesheet_exceptions
+      row:
+        timesheet_id: "{{ steps.load_timesheet.id }}"
+        candidate: "{{ steps.load_candidate.first_name }} {{ steps.load_candidate.last_name }}"
+        client: "{{ steps.load_client.name }}"
+        period_start: "{{ steps.load_timesheet.period_start }}"
+        period_end: "{{ steps.load_timesheet.period_end }}"
+        expected_hours: "{{ steps.check_hours.expected }}"
+        submitted_hours: "{{ steps.check_hours.submitted }}"
+
+  - id: alert_billing
+    action: slack.post
+    when: steps.check_hours.mismatch
+    with:
+      channel: "#billing"
+      text: >-
+        Timesheet {{ steps.load_timesheet.id }} for {{ steps.load_candidate.first_name }}
+        {{ steps.load_candidate.last_name }} at {{ steps.load_client.name }} has
+        {{ steps.check_hours.submitted }} hours against {{ steps.check_hours.expected }}
+        scheduled. Held for review; see the timesheet_exceptions sheet.
+
+  - id: find_worker
+    action: crosswalk.lookup
+    when: not steps.check_hours.mismatch
+    with:
+      entity: person
+      system: ats
+      external_id: "{{ steps.load_candidate.id }}"
+      target: payroll
+
+  - id: require_worker
+    action: hub.fail
+    when: not steps.check_hours.mismatch and not steps.find_worker.found
+    with:
+      message: >-
+        no payroll worker is linked to ATS candidate {{ steps.load_candidate.id }}
+        ({{ steps.load_candidate.email }}); link one with hub link, then replay
+        --from-step find_worker
+
+  - id: submit_hours
+    action: payroll.submit_hours
+    when: not steps.check_hours.mismatch
+    idempotency_key: "timesheet:{{ event.data.id }}:hours"
+    retry:
+      max_attempts: 6
+      base_seconds: 5
+    with:
+      worker_id: "{{ steps.find_worker.target_id }}"
+      period_start: "{{ steps.load_timesheet.period_start }}"
+      period_end: "{{ steps.load_timesheet.period_end }}"
+      hours: "{{ steps.load_timesheet.hours }}"
+
+  - id: ensure_customer
+    action: accounting.ensure_customer
+    when: not steps.check_hours.mismatch
+    idempotency_key: "client:{{ steps.load_client.id }}:customer"
+    with:
+      name: "{{ steps.load_client.name }}"
+
+  - id: create_invoice
+    action: accounting.create_invoice
+    when: not steps.check_hours.mismatch
+    idempotency_key: "timesheet:{{ event.data.id }}:invoice"
+    retry:
+      max_attempts: 6
+      base_seconds: 5
+    with:
+      customer_id: "{{ steps.ensure_customer.id }}"
+      memo: >-
+        {{ steps.load_candidate.first_name }} {{ steps.load_candidate.last_name }},
+        {{ steps.load_timesheet.period_start }} to {{ steps.load_timesheet.period_end }}
+      lines:
+        - description: "{{ steps.load_placement.job_title }} hours"
+          quantity: "{{ steps.load_timesheet.hours }}"
+          unit_price: "{{ steps.load_placement.bill_rate }}"

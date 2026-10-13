@@ -1,0 +1,52 @@
+name: nightly_payroll_reconciliation
+version: 1
+description: >
+  Every night, compare active placements in the ATS with worker records in payroll. Anyone
+  working without a payroll record goes on the reconciliation sheet and to the billing
+  channel before the next pay run.
+
+trigger:
+  schedule:
+    cron: "0 2 * * *"
+    timezone: America/Chicago
+
+steps:
+  - id: active_placements
+    action: ats.list_active_placements
+
+  - id: payroll_workers
+    action: payroll.list_workers
+
+  - id: compare
+    action: hub.set
+    with:
+      checked: "{{ steps.active_placements.count }}"
+      missing: '{{ steps.active_placements.candidate_emails | reject("in", steps.payroll_workers.emails) | list }}'
+
+  - id: report
+    action: sheets.append_row
+    when: steps.compare.missing | length > 0
+    idempotency_key: "reconciliation:{{ event.external_id }}:row"
+    with:
+      sheet: payroll_reconciliation
+      row:
+        run_at: "{{ event.data.fired_at }}"
+        checked: "{{ steps.compare.checked }}"
+        missing_count: "{{ steps.compare.missing | length }}"
+        missing: '{{ steps.compare.missing | join(", ") }}'
+
+  - id: alert
+    action: slack.post
+    when: steps.compare.missing | length > 0
+    with:
+      channel: "#billing"
+      text: >-
+        Payroll reconciliation: {{ steps.compare.missing | length }} of
+        {{ steps.compare.checked }} active placements have no payroll worker:
+        {{ steps.compare.missing | join(", ") }}.
+
+  - id: all_clear
+    action: hub.log
+    when: steps.compare.missing | length == 0
+    with:
+      message: "payroll reconciliation clean: {{ steps.compare.checked }} active placements checked"

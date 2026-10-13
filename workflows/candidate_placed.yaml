@@ -1,0 +1,96 @@
+name: candidate_placed
+version: 3
+description: >
+  A recruiter marks a candidate as placed in the ATS. Create the payroll worker if there is
+  none yet, link the two ids, send the onboarding packet for signature, tell the recruiter
+  and append the placements sheet row the finance team reads.
+
+trigger:
+  event:
+    source: ats
+    type: placement.created
+
+steps:
+  - id: load_placement
+    action: ats.get_placement
+    with:
+      placement_id: "{{ event.data.placementId }}"
+
+  - id: load_candidate
+    action: ats.get_candidate
+    with:
+      candidate_id: "{{ steps.load_placement.candidate_id }}"
+
+  - id: load_client
+    action: ats.get_client
+    with:
+      client_id: "{{ steps.load_placement.client_id }}"
+
+  - id: find_worker
+    action: crosswalk.lookup
+    with:
+      entity: person
+      system: ats
+      external_id: "{{ steps.load_candidate.id }}"
+      target: payroll
+
+  - id: create_worker
+    action: payroll.upsert_worker
+    when: not steps.find_worker.found
+    idempotency_key: "placement:{{ event.data.placementId }}:payroll-worker"
+    retry:
+      max_attempts: 5
+      base_seconds: 2
+    with:
+      email: "{{ steps.load_candidate.email }}"
+      first_name: "{{ steps.load_candidate.first_name }}"
+      last_name: "{{ steps.load_candidate.last_name }}"
+      pay_rate: "{{ steps.load_placement.pay_rate }}"
+
+  - id: link_worker
+    action: crosswalk.link
+    when: not steps.find_worker.found
+    with:
+      entity: person
+      ids:
+        ats: "{{ steps.load_candidate.id }}"
+        payroll: "{{ steps.create_worker.id }}"
+
+  - id: send_packet
+    action: esign.send_envelope
+    idempotency_key: "placement:{{ event.data.placementId }}:onboarding-packet"
+    with:
+      template: onboarding_packet
+      recipient_name: "{{ steps.load_candidate.first_name }} {{ steps.load_candidate.last_name }}"
+      recipient_email: "{{ steps.load_candidate.email }}"
+      fields:
+        candidate_id: "{{ steps.load_candidate.id }}"
+        placement_id: "{{ steps.load_placement.id }}"
+        client: "{{ steps.load_client.name }}"
+        job_title: "{{ steps.load_placement.job_title }}"
+        start_date: "{{ steps.load_placement.start_date }}"
+        pay_rate: "{{ steps.load_placement.pay_rate }}"
+
+  - id: notify_recruiter
+    action: slack.post
+    with:
+      channel: "#placements"
+      text: >-
+        {{ steps.load_candidate.first_name }} {{ steps.load_candidate.last_name }} placed at
+        {{ steps.load_client.name }} as {{ steps.load_placement.job_title }}, starting
+        {{ steps.load_placement.start_date }}. Onboarding packet sent to
+        {{ steps.load_candidate.email }}.
+
+  - id: log_placement
+    action: sheets.append_row
+    idempotency_key: "placement:{{ event.data.placementId }}:sheet-row"
+    with:
+      sheet: placements
+      row:
+        placement_id: "{{ steps.load_placement.id }}"
+        candidate: "{{ steps.load_candidate.first_name }} {{ steps.load_candidate.last_name }}"
+        client: "{{ steps.load_client.name }}"
+        job_title: "{{ steps.load_placement.job_title }}"
+        start_date: "{{ steps.load_placement.start_date }}"
+        recruiter: "{{ steps.load_placement.recruiter }}"
+        bill_rate: "{{ steps.load_placement.bill_rate }}"

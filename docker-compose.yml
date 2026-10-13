@@ -1,0 +1,65 @@
+x-hub: &hub
+  build: .
+  environment:
+    DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hub
+    WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me}
+    SLACK_MODE: ${SLACK_MODE:-sandbox}
+    SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    EMAIL_MODE: ${EMAIL_MODE:-sandbox}
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hub
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hub"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *hub
+    command: hub seed --no-reset --if-empty
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *hub
+    command: hub api --host 0.0.0.0 --port 8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *hub
+    command: hub worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hub
+      WORKER_ID: worker-1
+      SLACK_MODE: ${SLACK_MODE:-sandbox}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      EMAIL_MODE: ${EMAIL_MODE:-sandbox}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  scheduler:
+    <<: *hub
+    command: hub scheduler
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
