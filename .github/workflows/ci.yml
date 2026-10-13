@@ -39,6 +39,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose build
-      - run: ./scripts/smoke.sh
+      - run: bash scripts/smoke.sh
       - if: always()
         run: docker compose down -v
