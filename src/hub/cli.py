@@ -291,7 +291,7 @@ def fault(action: str, kind: str, count: int = typer.Argument(1)) -> None:
 @app.command()
 def simulate(
     scenario: str = typer.Argument(
-        ..., help="placement, duplicate, onboarding-signed, timesheet, lead"
+        ..., help="placement, duplicate, onboarding-signed, timesheet, lead, payroll-worker"
     ),
     api_url: str | None = typer.Option(
         None, help="Deliver through the API; omit to ingest in-process."
@@ -299,6 +299,9 @@ def simulate(
     mismatch: bool = typer.Option(False, help="timesheet: hours disagree with the placement"),
     unlinked: bool = typer.Option(False, help="timesheet: pick a candidate with no payroll worker"),
     existing: bool = typer.Option(False, help="lead: use a company already in the CRM"),
+    candidate: str | None = typer.Option(
+        None, help="payroll-worker: ATS candidate id; default is the first unlinked one"
+    ),
 ) -> None:
     """Emit a synthetic event the way the real application would."""
     rt = Runtime.build()
@@ -314,6 +317,8 @@ def simulate(
             _echo(sim.timesheet(mismatch=mismatch, unlinked=unlinked))
         elif scenario == "lead":
             _echo(sim.lead(existing_company=existing))
+        elif scenario == "payroll-worker":
+            _echo(sim.payroll_worker(candidate))
         else:
             raise typer.BadParameter(f"unknown scenario {scenario}")
     except HubError as exc:

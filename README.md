@@ -102,15 +102,16 @@ docker compose exec api hub simulate placement --api-url http://localhost:8000
 docker compose exec api hub runs            # waiting_retry, then succeeded; one worker created, step reused
 ```
 
-To fix the dead-lettered timesheet the way the ops team would:
+To fix the dead-lettered timesheet the way the ops team would: create the worker in payroll (the simulator stands in for that application), link the two ids, replay from the lookup step.
 
 ```bash
 docker compose exec api hub runs --status dead_lettered
-docker compose exec api hub link person ats:cand_1006 payroll:wk_7006      # after creating the worker
+docker compose exec api hub simulate payroll-worker --candidate cand_1006   # creates wk_7006 in payroll
+docker compose exec api hub link person ats:cand_1006 payroll:wk_7006
 docker compose exec api hub replay <run-id> --from-step find_worker
 ```
 
-`scripts/smoke.sh` runs this sequence against the stack and checks the outcomes; CI runs it on every push.
+`scripts/smoke.sh` runs this whole sequence against the stack, including the dead-letter fix, and checks the outcomes; CI runs it on every push.
 
 ### Without Docker
 

@@ -102,22 +102,12 @@ def test_timesheet_for_unlinked_candidate_dead_letters_then_replays(seeded, sim,
     assert len(alerts) == 1 and f"/ops/runs/{dead.id}" in alerts[0]["text"]
     loads_before = len(step_runs(seeded, dead.id, "load_timesheet"))
 
-    # The operator creates the payroll worker, links it, and replays.
+    # The operator creates the payroll worker (the simulator stands in for the payroll
+    # application), links it, and replays.
+    created = sim.payroll_worker("cand_1006")["worker"]
+    assert created["id"] == "wk_7006" and created["pay_rate"] == 20.5
     with seeded.session_factory() as session:
         store = seeded.adapters.store
-        store.put(
-            session,
-            "payroll",
-            "workers",
-            "wk_7006",
-            {
-                "email": "kenji.albrecht@example.com",
-                "first_name": "Kenji",
-                "last_name": "Albrecht",
-                "pay_rate": 20.5,
-                "status": "active",
-            },
-        )
         ctx = ActionContext(session, seeded.settings, clock, store, "test", "link", None)
         seeded.adapters["crosswalk"].link(ctx, "person", {"ats": "cand_1006", "payroll": "wk_7006"})
         session.commit()

@@ -147,16 +147,7 @@ class Simulator:
                 raise PermanentError("no active placements; run hub seed first")
             chosen = None
             if unlinked:
-                from sqlalchemy import select
-
-                from hub.db.models import EntityLink
-
-                linked = {
-                    r
-                    for r in session.execute(
-                        select(EntityLink.external_id).where(EntityLink.system == "ats")
-                    ).scalars()
-                }
+                linked = self._linked_ats_ids(session)
                 chosen = next((p for p in placements if p["candidate_id"] not in linked), None)
                 if chosen is None:
                     raise PermanentError("every active placement is already linked to payroll")
@@ -180,6 +171,64 @@ class Simulator:
             )
             session.commit()
         return {"timesheet": rec, "note": "approved in the ATS; the scheduler poll will pick it up"}
+
+    @staticmethod
+    def _linked_ats_ids(session) -> set[str]:
+        from sqlalchemy import select
+
+        from hub.db.models import EntityLink
+
+        stmt = select(EntityLink.external_id).where(EntityLink.system == "ats")
+        return set(session.execute(stmt).scalars())
+
+    def payroll_worker(self, candidate_id: str | None = None) -> dict[str, Any]:
+        """Create a candidate's worker record in payroll, as the ops team would in that application.
+
+        This is the manual half of fixing a timesheet that dead-lettered at require_worker:
+        create the worker here, link it with `hub link`, then replay from find_worker. The id
+        follows the seed convention (cand_1006 becomes wk_7006) so the README can name it.
+        """
+        store = self.rt.adapters.store
+        with self.rt.session_factory() as session:
+            if candidate_id is None:
+                linked = self._linked_ats_ids(session)
+                placements = store.find(session, "ats", "placements", status="active")
+                chosen = next((p for p in placements if p["candidate_id"] not in linked), None)
+                if chosen is None:
+                    raise PermanentError("every active placement is already linked to payroll")
+                candidate_id = chosen["candidate_id"]
+            candidate = store.get(session, "ats", "candidates", candidate_id)
+            if candidate is None:
+                raise PermanentError(f"no ATS candidate {candidate_id}")
+            active = store.find(
+                session, "ats", "placements", candidate_id=candidate_id, status="active"
+            )
+            pay_rate = active[0]["pay_rate"] if active else 18.0
+            if candidate_id.startswith("cand_1"):
+                worker_id = candidate_id.replace("cand_1", "wk_7", 1)
+            else:
+                worker_id = store.new_id("wk")
+            rec = store.put(
+                session,
+                "payroll",
+                "workers",
+                worker_id,
+                {
+                    "email": str(candidate["email"]).lower(),
+                    "first_name": candidate["first_name"],
+                    "last_name": candidate["last_name"],
+                    "pay_rate": pay_rate,
+                    "status": "active",
+                },
+            )
+            session.commit()
+        return {
+            "worker": rec,
+            "note": (
+                f"created in payroll; now hub link person ats:{candidate_id} payroll:{worker_id}, "
+                "then hub replay <run-id> --from-step find_worker"
+            ),
+        }
 
     def lead(self, existing_company: bool = False) -> dict[str, Any]:
         """A prospect submits the website form."""
